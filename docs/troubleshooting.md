@@ -63,6 +63,26 @@ Two different processes produce errors, and they surface in two different places
 - **Editor-side errors** — `@tool` script failures, import errors, addon errors, failures from scene/resource edits — come from `godot_editor_read` with the `get_log_messages` action. This is the "did my change break the editor?" channel.
 - **Running game console output** (including `print()` and stderr) is intentionally not duplicated here — [minimal-godot-mcp](https://github.com/ryanmazzolini/minimal-godot-mcp) provides it over DAP. Runtime *state* (positions, velocities, custom data) is `godot_runtime_state` territory.
 
+## 3D geometry is missing, but nothing errors
+
+Check placement in the **running game** before changing lights or materials. For runtime-spawned meshes, use [godot_exec](tools/exec.md) `run` to inspect the live nodes. Compare their measured bounds and positions with where you expected them to be:
+
+1. **Under the floor?** For each `MeshInstance3D`, `mesh_instance.global_transform * mesh_instance.get_aabb()` gives a world-space AABB. Compare its bottom and top Y with the actual supporting surface. Don't assume the floor is at `y = 0`: a `GridMap` cell's center is not its mesh's top surface. A downward ray from the bounds' center can find a collider; if it misses, try upward to look for a slab above the prop. This needs floor collision; without it, compare the surface's mesh bounds directly.
+2. **At an unintended origin?** Compare `global_position` with the parent and siblings. Props clustered at world `x = 0, z = 0` may have read a global transform before entering the tree. An origin position is a clue, not proof of a bug.
+3. **Outside the camera?** Use the active `Camera3D` for the relevant viewport. An AABB is outside the frustum if all eight corners are outside the same plane from `get_frustum()`. Testing only the node's origin can miss a mesh that extends into view. Off-frustum is normal for objects you aren't meant to see.
+
+Also check the **game console** for `Condition "!is_inside_tree()"`. Set global coordinates only after the node has entered the tree:
+
+```gdscript
+# parent is already inside the scene tree
+parent.add_child(prop)
+prop.global_position = desired_world_position
+```
+
+**Correction to [#328](https://github.com/satelliteoflove/godot-mcp/issues/328):** on Godot 4.6.1, a plain `global_position = p` before `add_child()` stores `p` as the local position and resets rotation and scale; it doesn't necessarily put the node at the origin. Component writes such as `global_position.y = v` and read-modify-writes such as `global_position += v` first read zero outside the tree, losing the previous coordinates. See Godot's [global_position documentation](https://docs.godotengine.org/en/stable/classes/class_node3d.html#class-node3d-property-global-position).
+
+The [MIT primitive-only reproduction](https://github.com/PilferedParrot/godot-mcp-328-invisible-geometry) includes a [runtime audit body](https://github.com/PilferedParrot/godot-mcp-328-invisible-geometry/blob/main/recipe/runtime_audit.body.txt) you can pass as `godot_exec run`'s `source`. Read its coverage notes: it needs colliders for surface checks, skips props with their own colliders, and checks only the root viewport's active camera. `CLEAN` means no findings among the nodes audited, not that everything is correctly placed or visible. [godot_validate_meshes](tools/validate-meshes.md) checks mesh data, not placement.
+
 ## CLI smoke test (paste-ready JSON-RPC)
 
 To verify the server starts and can reach Godot without involving an MCP client, run it manually:
