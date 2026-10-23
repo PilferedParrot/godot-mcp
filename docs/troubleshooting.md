@@ -65,13 +65,13 @@ Two different processes produce errors, and they surface in two different places
 
 ## 3D geometry is missing, but nothing errors
 
-Check placement in the **running game** before changing lights or materials. For runtime-spawned meshes, use [godot_exec](tools/exec.md) `run` to inspect the live nodes. Compare their measured bounds and positions with where you expected them to be:
+Check placement in the **running game** before changing lights or materials. Use `godot_exec run` to inspect live nodes:
 
-1. **Under the floor?** For each `MeshInstance3D`, `mesh_instance.global_transform * mesh_instance.get_aabb()` gives a world-space AABB. Compare its bottom and top Y with the actual supporting surface. Don't assume the floor is at `y = 0`: a `GridMap` cell's center is not its mesh's top surface. A downward ray from the bounds' center can find a collider; if it misses, try upward to look for a slab above the prop. This needs floor collision; without it, compare the surface's mesh bounds directly.
-2. **At an unintended origin?** Compare `global_position` with the parent and siblings. Props clustered at world `x = 0, z = 0` may have read a global transform before entering the tree. An origin position is a clue, not proof of a bug.
-3. **Outside the camera?** Use the active `Camera3D` for the relevant viewport. An AABB is outside the frustum if all eight corners are outside the same plane from `get_frustum()`. Testing only the node's origin can miss a mesh that extends into view. Off-frustum is normal for objects you aren't meant to see.
+1. **Under the floor?** Compare the bottom and top Y of `mesh_instance.global_transform * mesh_instance.get_aabb()` with the actual supporting surface. A `GridMap` cell's center is not its mesh's top surface; don't assume `y = 0`.
+2. **At an unintended origin?** Compare `global_position` with the parent and siblings. Props clustered at world `x = 0, z = 0` may have read a global transform before entering the tree. This is a clue, not proof.
+3. **Outside the camera?** Use the relevant viewport's active `Camera3D`. An AABB is outside the frustum if all eight corners are outside the same plane from `get_frustum()`. Test the bounds, not just the node's origin; off-frustum objects may be intentional.
 
-Also check the **game console** for `Condition "!is_inside_tree()"`. Set global coordinates only after the node has entered the tree:
+Check the **game console** via minimal-godot-mcp (see above) for `Condition "!is_inside_tree()"`. Set global coordinates after entering the tree:
 
 ```gdscript
 # parent is already inside the scene tree
@@ -79,9 +79,9 @@ parent.add_child(prop)
 prop.global_position = desired_world_position
 ```
 
-**Correction to [#328](https://github.com/satelliteoflove/godot-mcp/issues/328):** on Godot 4.6.1, a plain `global_position = p` before `add_child()` stores `p` as the local position and resets rotation and scale; it doesn't necessarily put the node at the origin. Component writes such as `global_position.y = v` and read-modify-writes such as `global_position += v` first read zero outside the tree, losing the previous coordinates. See Godot's [global_position documentation](https://docs.godotengine.org/en/stable/classes/class_node3d.html#class-node3d-property-global-position).
+Godot documents that [reading `global_position` outside the tree fails and returns `Vector3.ZERO`](https://docs.godotengine.org/en/4.6/classes/class_node3d.html#class-node3d-property-global-position). Measured on Godot 4.6.1 (4.5 was not tested): before `add_child()`, `global_position = p` stores `p` as the local position and resets rotation and scale, while `global_position.y = v` and `global_position += v` read zero first and lose previous coordinates.
 
-The [MIT primitive-only reproduction](https://github.com/PilferedParrot/godot-mcp-328-invisible-geometry) includes a [runtime audit body](https://github.com/PilferedParrot/godot-mcp-328-invisible-geometry/blob/main/recipe/runtime_audit.body.txt) you can pass as `godot_exec run`'s `source`. Read its coverage notes: it needs colliders for surface checks, skips props with their own colliders, and checks only the root viewport's active camera. `CLEAN` means no findings among the nodes audited, not that everything is correctly placed or visible. [godot_validate_meshes](tools/validate-meshes.md) checks mesh data, not placement.
+Optional: pass this [MIT runtime audit](https://github.com/PilferedParrot/godot-mcp-328-invisible-geometry/blob/81eb7084dcea40d07e1a42c80ae76de0185ab4eb/recipe/runtime_audit.body.txt) as `godot_exec run`'s `source`. Surface checks need colliders; props with their own colliders are skipped; only the root viewport's active camera is checked. `CLEAN` applies only to audited nodes and checks.
 
 ## CLI smoke test (paste-ready JSON-RPC)
 
